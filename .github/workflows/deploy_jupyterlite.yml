@@ -28,7 +28,7 @@ jobs:
       - name: Build the JupyterLite site
         run: |
           mkdir -p content
-          cp *.ipynb content/
+          cp *.ipynb *.py content/
           jupyter lite build --contents content --output-dir dist
 
 #      - name: Upload artifact
