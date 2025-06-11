@@ -31,7 +31,7 @@ def generate_dot(node):
         z_inf = n.get("z_inf", "None")
         x = n.get("x", None)
         x_str = str(np.round(x, 2)) if x is not None else "N/A"
-        label = f"{name}\\nP: {n['P']['name']}\\nz_inf: {z_inf}\\nx: {x_str}"
+        label = f"{name}\\nP: {n['name']}\\nz_inf: {z_inf}\\nx: {x_str}"
         lines.append(f'"{name}" [label="{label}"];')
 
         if 'left' in n and n['left']:
