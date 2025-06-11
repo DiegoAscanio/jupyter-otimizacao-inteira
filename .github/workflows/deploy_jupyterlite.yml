@@ -24,6 +24,14 @@ jobs:
       - name: Install the dependencies
         run: |
           python -m pip install -r requirements.txt
+
+      - name: Install micromamba
+        run:  |
+          curl -L https://micromamba.snakepit.net/api/micromamba/linux-64/latest | tar -xvj bin/micromamba
+          sudo mv bin/micromamba /usr/local/bin/
+          micromamba shell init -s bash -p ~/micromamba
+          echo ". /home/runner/micromamba/etc/profile.d/micromamba.sh" >> $GITHUB_ENV
+          micromamba activate base
     
       - name: Build the JupyterLite site
         run: |

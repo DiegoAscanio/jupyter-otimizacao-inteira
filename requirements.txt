@@ -5,7 +5,6 @@ jupyterlite-core
 jupyterlab
 notebook
 anywidget==0.9.13
-micromamba
 
 # KERNELS
 
