@@ -206,7 +206,7 @@ def select_current_problem(L, strategy = 'best'):
         return L.pop(0)
     elif strategy == 'best':
         # Select the problem with the best upper bound
-        # that must be the one with the biggest upper bound?
+        # for maximization problems as we're considering
         best_index = np.argmax([p['z_sup'] for p in L])
         return L.pop(best_index)
     else:
@@ -302,6 +302,7 @@ def _bound(L, z_star):
             L
         )
     )
+    # remove problems from bnb tree
     for P in to_leave:
         parent = P['parent']
         if parent['left'] == P:
@@ -408,7 +409,7 @@ def branch_and_bound(c, A, b, integrality = None, epsilon = 1e-3, problem_strate
                 z_star = current_z
                 x_star = current_x
             # Bounding
-            # Prune all active nodes in L with Z_sup worse than incumbent
+            # Prune all active nodes in L with z_sup worse than incumbent
             # z_star
             L = _bound(L, z_star)
             # go back to first step
@@ -419,7 +420,7 @@ def branch_and_bound(c, A, b, integrality = None, epsilon = 1e-3, problem_strate
         # Get the value of the variable to branch on
         branch_value = current_x[branch_index]
 
-        # updte at the current P which variable will branch with its lower and upper bounds
+        # update at the current P which variable will branch with its lower and upper bounds
         P_current['branch_variable'] = branch_index
         P_current['lower_bound'] = np.floor(branch_value)
         P_current['upper_bound'] = np.ceil(branch_value)
