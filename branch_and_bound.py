@@ -303,6 +303,7 @@ def _bound(L, z_star):
         )
     )
     # remove problems from bnb tree
+    '''
     for P in to_leave:
         parent = P['parent']
         if parent['left'] == P:
@@ -310,6 +311,7 @@ def _bound(L, z_star):
         else:
             parent['right'] = None
         P['parent'] = None
+    '''
     return to_remain
 
 def branch_and_bound(c, A, b, integrality = None, epsilon = 1e-3, problem_strategy = 'best', branching_strategy = 'lci', max_iters = 1e2):
@@ -361,6 +363,8 @@ def branch_and_bound(c, A, b, integrality = None, epsilon = 1e-3, problem_strate
         'right': None,
     }
     L = [ P ]
+    active_problems = {
+    }
     iters = 0
 
     while problems_to_solve(
@@ -368,9 +372,7 @@ def branch_and_bound(c, A, b, integrality = None, epsilon = 1e-3, problem_strate
         gap(biggest_z_sup, z_star) > epsilon,
         iters < max_iters
     ):
-        print(
-            list(p['name'] for p in L)
-        )       
+        active_problems[iters] = [p['name'] for p in L]
         # Step 1. Node selection:
         # Select the current problem based on the chosen strategy
         P_current = select_current_problem(L, problem_strategy)
@@ -448,4 +450,4 @@ def branch_and_bound(c, A, b, integrality = None, epsilon = 1e-3, problem_strate
 
         iters += 1
 
-    return z_star, x_star, bnb_tree, iters
+    return z_star, x_star, bnb_tree, active_problems, iters
