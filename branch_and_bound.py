@@ -1,7 +1,5 @@
+from scipy.optimize import linprog
 import numpy as np
-from simplex_two_phases import simplex
-from copy import deepcopy
-import pdb
 
 try:
     from graphviz import Digraph
@@ -28,10 +26,10 @@ def generate_dot(node):
         if n is None:
             return
         name = f"N{n['name']}"
-        z_inf = n.get("z_inf", "None")
+        z_sup = n.get("z_sup", "None")
         x = n.get("x", None)
         x_str = str(np.round(x, 2)) if x is not None else "N/A"
-        label = f"{name}\\nP: {n['name']}\\nz_inf: {z_inf}\\nx: {x_str}"
+        label = f"{name}\\nP: {n['name']}\\nz_sup: {z_sup}\\nx: {x_str}"
         lines.append(f'"{name}" [label="{label}"];')
 
         if 'left' in n and n['left']:
@@ -62,15 +60,15 @@ def draw_bnb_tree(node, graph=None):
     node_name = f"N{node['name']}"
 
     # Pega informações com verificação de existência
-    z_inf = node.get('z_inf')
-    z_inf_str = f"{z_inf:.2f}" if z_inf is not None and not np.isnan(z_inf) and not np.isinf(z_inf) else str(z_inf)
+    z_sup = node.get('z_sup')
+    z_sup_str = f"{z_sup:.2f}" if z_sup is not None and not np.isnan(z_sup) and not np.isinf(z_sup) else str(z_sup)
 
     x_vals = node.get('x')
     x_str = np.round(x_vals, 2) if x_vals is not None else "N/A"
 
     P_name = node['P']['name'] if 'P' in node and 'name' in node['P'] else 'N/A'
 
-    label = f"{node_name}\\nP: {P_name}\\nz_inf: {z_inf_str}\\nx: {x_str}"
+    label = f"{node_name}\\nP: {P_name}\\nz_sup: {z_sup_str}\\nx: {x_str}"
 
     graph.node(node_name, label, shape='box')
 
@@ -91,222 +89,362 @@ def draw_bnb_tree(node, graph=None):
 
     return graph
 
-def gap(z_inf, z_star):
-    if z_star == np.inf:
-        return np.inf
-    return (z_inf - z_star) / z_star
-
-def select_current_problem(L, estrategy = 'dfs'):
-    if estrategy == 'dfs':
-        return L.pop()
-    elif estrategy == 'bfs':
-        return L.pop(0)
-    elif estrategy == 'best':
-        return L.pop(np.argmax([-p['z_inf'] for p in L]))
-    else:
-        raise ValueError("Unknown strategy: {}".format(estrategy))
+def gap(z_sup, z_star):
+    """
+    Calculate the gap between the upper and lower bounds.
+    
+    Parameters:
+    - z_sup: Upper bound of the objective function.
+    - z_star: Lower bound of the objective function.
+    
+    Returns:
+    - The gap as a percentage of the upper bound.
+    """
+    g = np.clip(
+        (z_sup - z_star) / np.abs(z_star),
+        0,
+        1
+    )
+    return g if not np.isnan(g) else np.inf
 
 def check_integrality(x : np.ndarray, integrality):
     x_slice = x[integrality == 1]
     return np.all(np.isclose(x_slice, np.round(x_slice)))
 
-def least_close_to_integer_index(x, integrality):
+def solve_lp(c, A, b):
     """
-    Find the index of the variable that is least close to being an integer.
-    Arguments:
-    x -- numpy array of variable values
-    integrality -- numpy array indicating which variables should be integers
+    Solve the linear programming problem:
+        minimize c @ x
+        subject to A @ x <= b
+    using the simplex method.
+    
+    Parameters:
+    - c: Coefficients for the objective function.
+    - A: Coefficients for the inequality constraints.
+    - b: Right-hand side of the inequality constraints.
+    
     Returns:
-    index -- the index of the variable that is least close to an integer
+    - z_star: Optimal value of the objective function.
+    - x_star: Optimal solution vector.
+    - status: Status of the optimization (0 for success).
+    """
+    res = linprog(c, A_eq=A, b_eq=b, method='highs')
+    return res.fun, res.x, res.status
+
+def _least_close_to_integer_index(x, integrality):
+    """
+    Find the index of the variable that is least close to an integer value.
+    Arguments:
+    x -- current solution vector
+    integrality -- list of indices of variables that must take integer values
+    Returns:
+    The index of the variable that is least close to an integer value.
     """
     x_slice = x[integrality == 1]
-    fractional_parts = np.abs(x_slice - np.round(x_slice))
-    max_fractional_part = np.max(fractional_parts)
-    x_copy = np.copy(x)
-    x_copy = np.abs(x_copy - np.round(x_copy))
-    x_copy[integrality != 1] = np.inf  # Ignore non-integer variables
-    index, *_ = np.where(x_copy == max_fractional_part)
-    return index[0] if len(index) > 0 else None
+    distances = np.abs(x_slice - np.round(x_slice))
+    return np.argmax(distances)
 
-def breadth_first_search(branch_and_bound_tree, target):
-    from collections import deque
-    root = branch_and_bound_tree
+def _first_non_integer_index(x, integrality):
+    """
+    Find the index of the first variable that is not an integer.
+    Arguments:
+    x -- current solution vector
+    integrality -- list of indices of variables that must take integer values
+    Returns:
+    The index of the first variable that is not an integer.
+    """
+    x_slice = x[integrality == 1]
+    for i, val in enumerate(x_slice):
+        if not np.isclose(val, np.round(val)):
+            break
+    return i
 
-    if root is None:
-        return None
+def _random_non_integer_index(x, integrality):
+    """
+    Find a random index of a variable that is not an integer.
+    Arguments:
+    x -- current solution vector
+    integrality -- list of indices of variables that must take integer values
+    Returns:
+    A random index of a variable that is not an integer.
+    """
+    x_slice = x[integrality == 1]
+    non_integer_indices = np.where(~np.isclose(x_slice, np.round(x_slice)))[0]
+    return np.random.choice(non_integer_indices)
 
-    queue = deque([root])
+def select_to_branch(x, integrality, strategy = 'lci'):
+    """
+    Find the index of the variable to branch according to the chosen strategy.
+    Arguments:
+    x -- current solution vector
+    integrality -- list of indices of variables that must take integer values
+    strategy -- strategy for selecting the variable to branch ('lci', 'fni', 'random')
+    Returns:
+    The index of the variable to branch.
+    """
+    if strategy == 'lci':
+        return _least_close_to_integer_index(x, integrality)
+    elif strategy == 'fni':
+        return _first_non_integer_index(x, integrality)
+    elif strategy == 'random':
+        return _random_non_integer_index(x, integrality)
+    else:
+        raise ValueError("Unknown strategy: {}".format(strategy))
 
-    while queue:
-        current_node = queue.popleft()
+def select_current_problem(L, strategy = 'best'):
+    """
+    Select the current problem to solve based on the chosen strategy.
+    Arguments:
+    L -- list of problems to solve
+    strategy -- strategy for selecting the current problem ('dfs', 'bfs', 'best')
+    Returns:
+    The selected problem from the list L.
+    """
+    if strategy == 'dfs':
+        return L.pop()
+    elif strategy == 'bfs':
+        return L.pop(0)
+    elif strategy == 'best':
+        # Select the problem with the best upper bound
+        # that must be the one with the biggest upper bound?
+        best_index = np.argmax([p['z_sup'] for p in L])
+        return L.pop(best_index)
+    else:
+        raise ValueError("Unknown strategy: {}".format(strategy))
 
-        # Check if the current node's name matches the target
-        if current_node['name'] == target:
-            return current_node
-
-        # Add left and right children to the queue
-        if current_node['left'] is not None:
-            queue.append(current_node['left'])
-        if current_node['right'] is not None:
-            queue.append(current_node['right'])
-    return None  # Target not found in the tree
-
-def branch_and_bound(c, A, b, integrality = None, epsilon = 1e-3, estrategy = 'dfs'):
-    _, n = A.shape
-    if integrality is None:
-        integrality = np.ones(n)
-    z_star = np.inf  # Initialize with positive infinity
-    best_z_inf = -np.inf  # Initialize with negative infinity
-    x_star = None
-    P = {
-        'name': 0,
-        'c': c,
-        'A': A,
-        'b': b,
-        'z_inf': -np.inf,  # Initialize with negative infinity
-        'z_star': np.inf,  # Initialize with positive infinity
-        'integrality': integrality
-    }
-    L = [P]
-    iters = 0
-    snapshots = {}
-    branch_and_bound_tree = {
-        'name': P['name'],
+def _create_subproblem(P, branch_index, bound, direction):
+    """
+    Create a subproblem by branching on the variable at branch_index.
+    The bound is applied to the variable at branch_index in the specified direction.
+    
+    Parameters:
+    - P: Current problem node.
+    - branch_index: Index of the variable to branch on.
+    - bound: Value to set for the variable at branch_index.
+    - integrality: List of indices of variables that must take integer values.
+    - direction: 'up' or 'down' indicating the direction of the branch.
+    
+    Returns:
+    - A new problem dictionary representing the subproblem.
+    """
+    if direction == 'right':
+        # for the right branch, we set the variable to be greater than
+        # or equal to the bound, so, we'll add a new constraint with
+        # an excess variable. we'll also set the bound to be the ceil
+        coefficient = -1
+        bound = np.ceil(bound)
+    elif direction == 'left':
+        # for the left branch, we set the variable to be less than
+        # or equal to the bound, so, we'll add a new constraint with
+        # a slack variable. we'll also set the bound to be the floor
+        coefficient = 1
+        bound = np.floor(bound)
+    # x_branch_index (le / ge) (floor / ceil) bound
+    new_A = np.hstack([
+        P['A'],
+        np.zeros((P['A'].shape[0], 1))  # add a new column for the new variable
+    ])
+    new_A = np.vstack([
+        new_A,
+        np.zeros((1, new_A.shape[1]))  # add a new row for the new constraint
+    ])
+    new_A[-1, branch_index] = 1
+    new_A[-1, -1] = coefficient 
+    new_b = np.hstack([
+        P['b'],
+        bound  # add the new bound
+    ])
+    new_c = np.hstack([
+        P['c'],
+        0  # the new variable does not contribute to the objective function
+    ])
+    subproblem = {
+        'name': 2 * P['name'] + (2 if direction == 'right' else 1),
         'branch_variable': None,
+        'integrality': np.hstack((P['integrality'], [0])),
         'lower_bound': -np.inf,
         'upper_bound': np.inf,
-        'z_inf': -np.inf,
+        'A': new_A,
+        'b': new_b,
+        'c': new_c,
+        'z': -np.inf,  # initial z is set to -inf
+        'z_sup': P['z_sup'],  # upper bound remains the same from parent
         'x': None,
-        'P': None,
+        'status': None,
+        'parent': P,
         'left': None,
-        'right': None
+        'right': None,
     }
-    while len(L) > 0 and gap(best_z_inf, z_star) > epsilon:
-        # 1. Select the current problem based on the strategy
-        current_L = deepcopy(L)  # Make a copy of L to snapshot it
-        P_current = select_current_problem(L, estrategy)
-        root_node = breadth_first_search(branch_and_bound_tree, P_current['name'])
-        root_node['P'] = P_current
+    return subproblem
 
-        # 2. Solve the linear relaxation
-        c = P_current['c']
-        A = P_current['A']
-        m, n = A.shape
-        b = P_current['b']
-        I = np.arange( n - m, n)
-        integrality = P_current['integrality']
-        z_current, x_solution, I_star, A_I, A, _, solution_type, debug_info = simplex(
-            A, b, c, I
+problems_to_solve = lambda x, y, z: x and y and z
+
+def _bound(L, z_star):
+    """
+    Bound tree removing all active problems with superior limits inferior
+    than the best incumbent solution. We'll also remove them from the BnB
+    tree
+    Args:
+        L: list of active problems
+        z_star: best incumbent solution value
+    Returns:
+        to_remain: Updated list of active problems
+    """
+    to_remain = list(
+        filter(
+            lambda x: x['z_sup'] > z_star,
+            L
         )
+    )
+    to_leave = list(
+        filter(
+            lambda x: x['z_sup'] <= z_star,
+            L
+        )
+    )
+    for P in to_leave:
+        parent = P['parent']
+        if parent['left'] == P:
+            parent['left'] = None
+        else:
+            parent['right'] = None
+        P['parent'] = None
+    return to_remain
 
-        snapshots[iters] = {
-            'z_LR': z_current,
-            'x_LR': x_solution,
-            'L': current_L
-        }
-        iters += 1 # Increment the iteration counter
+def branch_and_bound(c, A, b, integrality = None, epsilon = 1e-3, problem_strategy = 'best', branching_strategy = 'lci', max_iters = 1e2):
+    """
+    Solve the mixed integer linear programming problem using branch and bound.
+    Assuming that the objective function is to max c @ x subject 
+    to A @ x = b and x >= 0.
+    
+    Parameters:
+    - c: Coefficients for the objective function.
+    - A: Coefficients for the inequality constraints.
+    - b: Right-hand side of the inequality constraints.
+    - integrality: List of indices of variables that must take integer values.
+    - epsilon: Tolerance for optimality.
+    - problem_strategy: Strategy for selecting the current problem ('dfs', 'bfs', 'best').
+    - branching_strategy: Strategy for selecting the variable to branch ('lci', 'fni', 'random').
+    
+    Returns:
+    - z_star: Optimal value of the objective function.
+    - x_star: Optimal solution vector.
+    - bnb_tree: Dictionary representing the branch and bound tree.
+    - iters: number of iterations
+    """
 
-        # 1. If the current problem is infeasible, skip this branch
-        if solution_type == -1:
-            continue 
-        x_current = np.zeros(n)
-        x_current[I_star] = x_solution
-        # update root node values for bnb tree
-        root_node['z_inf'] = z_current
-        root_node['x'] = x_current
-        P_current['z_inf'] = z_current
-        # 2. if z_current is gt than the best_z_inf found untill now
-        # we have a thighter inferior bound, so we update it
-        if z_current > best_z_inf:
-            best_z_inf = z_current
-        # 4. Check if the current solution is worse than the best known solution
-        # for the current problem, assuming we're handling minimization
-        if z_current >= z_star:
+    if integrality is None:
+        m, n = A.shape
+        # we expect at least n - m integer variables
+        # and let excess and slack variables be free
+        integrality = [1] * (n - m) + [0] * m
+
+    z_star = -np.inf
+    biggest_z_sup = np.inf
+    x_star = None
+    bnb_tree = P = {
+        'name': 0,
+        'branch_variable': None,
+        'integrality': integrality,
+        'lower_bound': -np.inf,
+        'upper_bound': np.inf,
+        'A': A,
+        'b': b,
+        'c': -c, # as linprog minimizes by default
+        'z': z_star,
+        'z_sup': biggest_z_sup,
+        'x': None,
+        'status': None,
+        'parent': None,
+        'left': None,
+        'right': None,
+    }
+    L = [ P ]
+    iters = 0
+
+    while problems_to_solve(
+        len(L) > 0,
+        gap(biggest_z_sup, z_star) > epsilon,
+        iters < max_iters
+    ):
+        print(
+            list(p['name'] for p in L)
+        )       
+        # Step 1. Node selection:
+        # Select the current problem based on the chosen strategy
+        P_current = select_current_problem(L, problem_strategy)
+
+        # 1.1 Solve the LRP
+        current_z, current_x, current_status = solve_lp(
+            P_current['c'],
+            P_current['A'],
+            P_current['b']
+        )
+        P_current['status'] = current_status
+
+        # Step 2. Elimination test 1
+        # If the current problem is infeasible, we skip it
+        if current_status != 0:
             continue
-        # 5. Check if the current solution is integral and better than the best
-        # known solution
-        if check_integrality(x_current, integrality):
-            if z_current < z_star:
-                z_star = z_current
-                x_star = x_current
-            # prune all active nodes that have a z_inf greater than the current z_star
-            active_nodes = iter(
-                deepcopy(L)  # Use deepcopy to avoid modifying iterator while changing L
-            )
-            P_active = next(active_nodes, None)
-            while P_active is not None:
-                if P_active['z_inf'] >= z_star:
-                    L.remove(P_active)
-                P_active = next(active_nodes, None)
-            continue # go back to the beginning of the loop
-        # 6. If the solution is not integral, branch on the variable that is least
-        # close to being an integer
-        index = least_close_to_integer_index(x_current, integrality)
-        # we'll assume index is always valid
-        lower_partition = np.floor(x_current[index])
-        upper_partition = np.ceil(x_current[index])
-        # we'll divide P_current into two new problems
-        # 1. Lower partition problem
-        P_lower = {
-            'name': 2 * P_current['name'] + 1,  # Unique name for the new problem
-            'z_inf': -np.inf,  # Initialize with negative infinity
-            'z_star': np.inf,  # Initialize with positive infinity
-            'integrality': np.hstack((integrality, [0]))
-        }
-        # add one new slack variable for the new constraint
-        # x[index] <= lower_partition
-        P_lower['c'] = np.hstack([c, np.zeros(1)])
-        # add the new constraint to A and b
-        P_lower['A'] = np.hstack([A, np.zeros((m, 1))])
-        P_lower['A'] = np.vstack([P_lower['A'], np.zeros(n + 1)])
-        P_lower['A'][-1, index] = 1
-        P_lower['A'][-1, -1] = 1  # slack variable
-        P_lower['b'] = np.hstack([b, lower_partition])
-        L.append(P_lower)
-        # 2. Upper partition problem
-        P_upper = {
-            'name': 2 * P_current['name'] + 2,  # Unique name for the new problem
-            'z_inf': -np.inf,  # Initialize with negative infinity
-            'z_star': np.inf,  # Initialize with positive infinity
-            'integrality': np.hstack((integrality, [0]))
-        }
-        # add one new excess variable for the new constraint
-        # x[index] >= upper_partition
-        P_upper['c'] = np.hstack([c, np.zeros(1)])
-        # add the new constraint to A and b
-        P_upper['A'] = np.hstack([A, np.zeros((m, 1))])
-        P_upper['A'] = np.vstack([P_upper['A'], np.zeros(n + 1)])
-        P_upper['A'][-1, index] = 1
-        P_upper['A'][-1, -1] = -1  # excess variable
-        P_upper['b'] = np.hstack([b, upper_partition])
-        L.append(P_upper)
 
-        # Update the branch and bound tree structure
-        root_node['branch_variable'] = index
-        root_node['lower_bound'] = lower_partition
-        root_node['upper_bound'] = upper_partition
-        root_node['left'] = {
-            'name': P_lower['name'],
-            'left': None,
-            'right': None
-        }
+        current_z *= -1  # since we minimized the negative of the objective function
+        P_current['z_sup'] = current_z
+        P_current['z'] = current_z
+        P_current['x'] = current_x
 
-        root_node['right'] = {
-            'name': P_upper['name'],
-            'left': None,
-            'right': None
-        }
+        # Step 3. Elimination test 2
+        # If the current optimal solution is worse than the best found
+        # so far, we skip it
+        if current_z <= z_star:
+            continue
 
-    return z_star, x_star, iters, snapshots, branch_and_bound_tree
+        # Step 4. Elimination test 3
+        # update the best solution found so far if it matches integrality
+        # criteria
+        if check_integrality(current_x, P_current['integrality']):
+            # Update incumbent z_star and x_star if current_z
+            # is better than incumbent z_star
+            if current_z > z_star:
+                z_star = current_z
+                x_star = current_x
+            # Bounding
+            # Prune all active nodes in L with Z_sup worse than incumbent
+            # z_star
+            L = _bound(L, z_star)
+            # go back to first step
+            continue
+        # Step 5. Branching
+        # Select the variable to branch on according to the chosen strategy
+        branch_index = select_to_branch(current_x, P_current['integrality'], branching_strategy)
+        # Get the value of the variable to branch on
+        branch_value = current_x[branch_index]
 
-A = np.array([
-    [5, 2, 3, 2, 2, 1]
-])
+        # updte at the current P which variable will branch with its lower and upper bounds
+        P_current['branch_variable'] = branch_index
+        P_current['lower_bound'] = np.floor(branch_value)
+        P_current['upper_bound'] = np.ceil(branch_value)
 
-b = np.array([
-    7
-])
 
-c = np.array([-10, -6, -7, -2, -1, 0])
+        # Create two subproblems: one for the left branch (<= floor) and one for the right branch (>= ceil)
+        left_subproblem = _create_subproblem(
+            P_current, branch_index, branch_value, 'left'
+        )
+        right_subproblem = _create_subproblem(
+            P_current, branch_index, branch_value, 'right'
+        )
+        # Add them to P_current
+        P_current['left'] = left_subproblem
+        P_current['right'] = right_subproblem
 
-integrality = np.array([1, 1, 1, 1, 1, 0])  # x1 and x2 are integers
+        # Add them to L
+        L += [
+            left_subproblem,
+            right_subproblem
+        ]
+
+        # 7th and last step: update problems_to_solve condition
+        biggest_z_sup = np.max([p['z_sup'] for p in L])
+
+        iters += 1
+
+    return z_star, x_star, bnb_tree, iters
