@@ -171,9 +171,10 @@ def _dual_feasible_basis(
     A_aux = np.hstack((A_aux, new_restriction_column))
     # adding big M rhs into b_aux array
     big_M = np.abs(np.max(b) * 2**10)
-    b_aux = np.hstack((b_aux, big_M))
+    b_aux = np.append(b_aux, big_M)
+
     # adding new slack variable into c_aux array
-    c_aux = np.hstack((c_aux, 0))  # slack variable has zero cost
+    c_aux = np.append(c_aux, 0)
     # and adding it into the new basis
     I = list(I) + [n]
     # we need to compute the new c_hat_J_aux to find a dual feasible basis
