@@ -25,6 +25,11 @@ def _compute_fractionals(arr : np.ndarray | np.float64) -> np.ndarray | np.float
     """
     return arr - np.floor(arr)
 
+def _prepare_A_and_b_to_apply_gommory_cuts(A, b, I):
+    A_I = A[:, I]
+    A_I_inv = np.linalg.inv(A_I)
+    return A_I_inv @ A, A_I_inv @ b
+
 def _gommorys_dual_fractional_cut(
     A: np.ndarray,
     b: np.ndarray,
@@ -54,8 +59,6 @@ def _gommorys_dual_fractional_cut(
         cut_performed (bool): Whether a cut was performed.
     """
     m, n = A.shape
-    A_I = A[:, I]  # Extract the columns corresponding to the basic variables
-    A_I_inv = np.linalg.inv(A_I)  # Inverse of the basic variable matrix
     # Step 1. Create a copy of A, b, and c
     A_cutted = A.copy()
     b_cutted = b.copy()
@@ -70,7 +73,7 @@ def _gommorys_dual_fractional_cut(
     # Step 3. With its index, compute the fractional parts of the row
     rhs_fraction = _compute_fractionals(b[index])
     lhs_fraction = np.zeros((1, n + 1))
-    lhs_fraction[0, J] = _compute_fractionals((A_I_inv @ A)[index, J])
+    lhs_fraction[0, J] = _compute_fractionals(A[index, J])
     lhs_fraction[0, -1] = -1 # For the excess variable
 
     # Step 4. Add the new constraint cut to A_cutted, b_cutted, and c_cutted
@@ -132,7 +135,9 @@ def cutting_planes(
             continuity = False
             continue
 
-        # Otherwise, we try to perform a Gommory's cut
+        # Otherwise, we try to perform a Gommory's cut at the result
+        # obtained from the dual simplex method
+        A, b = _prepare_A_and_b_to_apply_gommory_cuts(A, b, I_star)
         A, b, c, I, cut_performed = _gommorys_dual_fractional_cut(A, b, c, I_star, J, epsilon)
 
         # update steps with the current iteration data
