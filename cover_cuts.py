@@ -1,6 +1,7 @@
-from scipy.optimize import milp, LinearConstraint, linprog
+from scipy.optimize import milp, LinearConstraint, linprog, Bounds
 from gommory_cuts import _non_integer_mask
 import numpy as np
+import pdb
 
 def _solve_separation_problem(x_bar, weights, knapsack_capacity):
     """
@@ -15,35 +16,39 @@ def _solve_separation_problem(x_bar, weights, knapsack_capacity):
     """
     # Step 1. build separation problem of kind
     # zeta = min (1 - x_bar)^T @ y subject to
-    # weights @ y >= knapsack_capacity - 1 or
-    # - weights @ y + s_variable <= - knapsack_capacity + 1
-    n = len(x_bar)
+    # weights @ y > knapsack_capacity or
+    # - weights @ y + s_variable = - knapsack_capacity - 1
     b = knapsack_capacity
     a = weights
+    n = len(a)
     c = np.concatenate(
-        (1 - x_bar, np.zeros(1))
+            ((1 - x_bar)[0:n], np.zeros(1))
     )
     constraints = LinearConstraint(
         A = np.concatenate(
             (-a, np.ones(1))
         ),
-        lb = -b + 1,
-        ub = -b + 1
+        lb = -b - 1,
+        ub = -b - 1
     )
     integrality = np.array(
         [1] * n + [0]
     )  # y is binary, s_variable can be continuous, there's no difference
+    bounds = Bounds(
+        lb=np.zeros(n + 1),  # y >= 0, slack variable >= 0
+        ub=np.ones(n + 1)    # y <= 1, slack variable <= 1
+    )
     # Step 2. solve the separation problem
     res = milp(
         c=c,
         constraints=constraints,
+        bounds=bounds,
         integrality=integrality
     )
     if not res.success:
         raise ValueError("MILP solver failed to find a valid cover cut.")
     y = res.x[:-1]  # Exclude the slack variable
     zeta = res.fun
-
     return (y, True) if zeta < 1 else (None, False)
 
 def solve_0_1_knapsack_with_cover_cuts(
@@ -68,7 +73,7 @@ def solve_0_1_knapsack_with_cover_cuts(
         iterations: Number of iterations performed.
         steps: Dictionary containing the steps of the cuts performed
     """
-    n = len(weights)
+    N = len(weights)
     steps = {}
     # transform weights and values into arrays
     weights = np.array(weights)
@@ -77,34 +82,40 @@ def solve_0_1_knapsack_with_cover_cuts(
     # Step 0. Build the initial LP problem
     # First, we'll make sure that all variables are in [0, 1] interval
     A = np.hstack(
-        (np.eye(n), np.eye(n))
+        (np.eye(N), np.eye(N))
     )
     # then we'll add the capacity constraint
     # first, add last column:
     A = np.hstack(
-        (A, np.zeros((n, 1)))
+        (A, np.zeros((N, 1)))
     )
     # then, add last row
     A = np.vstack(
         (
             A, np.concatenate(
-                (weights, np.zeros(n), np.ones(1))
+                (weights, np.zeros(N), np.ones(1))
             )
         )
     )
     # now build rhs b vector
     b = np.concatenate(
-        (np.ones(n), [knapsack_capacity])
+        (np.ones(N), [knapsack_capacity])
     )
 
     # now build the objective function c vector
     c = np.concatenate(
-        (-values, np.zeros(n + 1))
+        (-values, np.zeros(N + 1))
     )
+
+    steps['start'] = {
+        'A': np.copy(A),
+        'b': np.copy(b),
+        'c': np.copy(c)
+    }
 
     iterations = 0
     stop_criteria = False
-    solution_type = np.nan  # nan means no solution found yet
+    solution_type = -1  # -1 means no solution found yet
     x_star = None
     optimal_value = -np.inf
 
@@ -117,8 +128,8 @@ def solve_0_1_knapsack_with_cover_cuts(
         )
 
         # step 2. verify if x_star is integer
-        x_candidate = res.x[:-1]  # Exclude the slack variable
-        if not np.all(_non_integer_mask(x_candidate)):
+        x_candidate = res.x[:N]  # Exclude the slack variable
+        if np.all(~_non_integer_mask(x_candidate)):
             # If x_star is integer, we have found the optimal solution
             x_star = x_candidate
             optimal_value = -res.fun
@@ -164,14 +175,14 @@ def solve_0_1_knapsack_with_cover_cuts(
                 solution_type = 0
         # Step 4. update the steps dictionary
         steps[iterations] = {
-            'A': A,
-            'b': b,
-            'c': c
+            'A': np.copy(A),
+            'b': np.copy(b),
+            'c': np.copy(c)
         }
         # Step 5. increment the iterations counter
         iterations += 1
         # Step 6. update the stop criteria
-        stop_criteria = solution_type != np.nan or iterations >= max_iterations
+        stop_criteria = solution_type != -1 or iterations >= max_iterations
     # Step 7. return the found results
     return (
         optimal_value,
