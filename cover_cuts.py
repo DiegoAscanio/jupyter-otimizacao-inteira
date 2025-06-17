@@ -51,14 +51,68 @@ def _solve_separation_problem(x_bar, weights, knapsack_capacity):
     zeta = res.fun
     return (y, True) if zeta < 1 else (None, False)
 
-def solve_0_1_knapsack_with_cover_cuts(
+def _lift_cover_inequality(to_consider, beta, weights, knapsack_capacity, own_weight):
+    """ Lift the cover cut inequality to a new stronger inequality
+        that will make fractionals solution infeasible from a minimum
+        cover
+    """
+    N = len(weights)
+    indices, *_ = np.where(np.isclose(to_consider, 1.0))
+    # Step 1. build the maximization problem from the coefficients_to_consider
+    c = np.concatenate((- to_consider, [0])) # as we're solving a maximization problem
+    b = knapsack_capacity - own_weight
+    A = np.zeros((1, N + 1))
+    A[0, indices] = weights[indices]
+    A[0, -1] = 1  # slack variable
+    constraint = LinearConstraint(
+        A=A,
+        lb=b,
+        ub=b
+    )
+    # All variables are continuous except for the ones we should consider
+    integrality = np.zeros(N + 1)
+    integrality[indices] = 1
+    bounds = Bounds(
+        lb=np.zeros(N + 1),  # all variables >= 0
+        ub=np.ones(N + 1)    # all variables <= 1
+    )
+    # Step 2. solve the maximization problem
+    res = milp(
+        c=c,
+        constraints=constraint,
+        bounds=bounds,
+        integrality=integrality
+    )
+    # step 3 - return computed alpha
+    return beta - res.fun * (-1) if res.success else None
+
+def _sequential_lifting(initial_cover, beta, weights, knapsack_capacity):
+    uncovered_set_indices, *_ = np.where(initial_cover == 0)
+    to_consider = np.copy(initial_cover)
+    for index in uncovered_set_indices:
+        # Step 1. compute the own weight of the item
+        own_weight = weights[index]
+        # Step 2. lift the cover inequality
+        alpha = _lift_cover_inequality(
+            to_consider,
+            beta,
+            weights,
+            knapsack_capacity,
+            own_weight
+        )
+        if alpha is not None:
+            # Step 3. update the to_consider vector
+            to_consider[index] = alpha
+    return to_consider
+
+def apply_cover_cuts_to_0_1_knapsack(
     weights,
     values,
     knapsack_capacity,
     max_iterations=1000
 ):
     """
-    Solve the 0-1 knapsack problem with cover cuts.
+    Apply cover cuts to the 0-1 knapsack problem.
     
     Args:
         weights: List of weights of items.
@@ -67,9 +121,9 @@ def solve_0_1_knapsack_with_cover_cuts(
         max_iterations: Maximum number of iterations for the separation algorithm.
     
     Returns:
-        optimal_value: Optimal value of the knapsack.
-        x_opt: Optimal solution vector.
-        solution_type: 1 if the solution is optimal and feasible, 0 otherwise
+        optimal_value: Optimal value of the knapsack if found, -inf otherwise.
+        x_opt: Optimal solution vector if possible, None otherwise.
+        solution_type: 1 if cover cuts found an optimal solution, 0 otherwise.
         iterations: Number of iterations performed.
         steps: Dictionary containing the steps of the cuts performed
     """
@@ -147,6 +201,15 @@ def solve_0_1_knapsack_with_cover_cuts(
                 # The cover cut is of the form y^T @ x <= |y| - 1
                 # where |y| is the number of items in the cover cut
                 cover_cardinality = np.sum(y) # as y is binary
+
+                # we try to make the cover cut even stronger by lifting it
+                y = _sequential_lifting(
+                    y,
+                    cover_cardinality - 1,
+                    weights,
+                    knapsack_capacity
+                )
+
                 # 3.1 add a new column to A
                 m, n = A.shape
                 A = np.hstack(
