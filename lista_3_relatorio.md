@@ -7,6 +7,9 @@
         margin-top: 0.25in;
         margin-bottom: 0.25in;
     }
+    p {
+        text-align: justify;
+    }
     img {
         display: block;
         margin-left: auto;
@@ -48,6 +51,10 @@ MathJax.Hub.Config({
 
 Autor: [Diego Ascânio Santos](mailto:ascanio@cefetmg.br)
 
+Suporte de cálculos e resoluções disponível em: [https://ascanio.dev/jupyter-otimizacao-inteira/lab/index.html?path=lista-3-otimizacao-inteira.ipynb](https://ascanio.dev/jupyter-otimizacao-inteira/lab/index.html?path=lista-3-otimizacao-inteira.ipynb)
+
+---
+
 ![](https://i.imgur.com/aAmyuEt.png)
 
 ## 1. a)
@@ -86,6 +93,8 @@ $$
 \end{align}
 $$
 
+---
+
 ![](https://i.imgur.com/AdkLHpH.png)
 
 ## 2. a)
@@ -115,48 +124,13 @@ Fazendo o lifting dos cortes propostos:
 
 $$
 \begin{align}
-& x\_0 + x\_2 \leq 1.00 \\\\
-& x\_1 + x\_2 \leq 1.00 \\\\
-& x\_0 + x\_1 + x\_3 \leq 2.00
+& x\_1 + x\_3 \leq 1.00 \\\\
+& x\_2 + x\_3 \leq 1.00 \\\\
+& x\_1 + x\_2 + x\_3 + x\_4 \leq 2.00
 \end{align}
 $$
 
-É possível observar que infelizmente não foi possível adicionar aos cortes mínimos encontrados quaisquer outras variáveis para deixar os cortes ainda mais fortes.
-
-O código abaixo mostra as tentativas de _lifting_ realizadas:
-
-```python
-
-extended_cuts = r'''$$
-\begin{align}
-'''
-# primeira cobertura minima: x_0 + x_2 <= 1
-minimal_covers = [
-    [1, 0, 1, 0],
-    [0, 1, 1, 0],
-    [1, 1, 0, 1]
-]
-for y in minimal_covers:
-    beta = np.sum(y) - 1
-    extended_y = _sequential_lifting(
-        y,
-        beta,
-        weights,
-        knapsack_capacity
-    )
-    cut = display_cut(
-        np.concatenate(
-            (extended_y, [1, beta])
-        ),
-        type = 'cover'
-    )
-    extended_cuts += cut
-    extended_cuts += r'\\' + '\n'
-extended_cuts += r'''\end{align}
-$$
-'''
-
-```
+É possível observar que ao menos o último corte pôde ser extendido e fortalecido pela adição da variável $x\_3$.
 
 ## 2. b)
 
@@ -179,8 +153,7 @@ Os cortes de cobertura que eliminam a solução fracional do problema relaxado s
 
 $$
 \begin{align}
-    & x\_0 + x\_1 + x\_3 \leq 2.00 \\\\
-    & x\_0 + x\_2 \leq 1.00
+    & x\_1 + x\_2 + x\_3 + x\_4 \leq 2.00 \\\\
 \end{align}
 $$
 
@@ -188,9 +161,54 @@ Adicionando estes cortes e resolvendo o problema, temos por solução:
 
 \begin{align}
     z^{\*} &= 10.00 \\\\
-    x^{\*} &= [ 1.00, \ 1.00, \ 0.00, \ 0.00, \ 0.00, \ 0.00, \ 0.00, \ 1.00, \ 1.00, \ 0.00, \ 0.00, \ 9214.00 ] \\\\
-    I^{\*} &= [ 5, \ 1, \ 6, \ 7, \ 11, \ 2, \ 8, \ 0 ]
+    x^{\*} &= [ 1.00, \ 1.00, \ 0.00, \ 0.00, \ 0.00, \ 0.00, \ 0.00, \ 1.00, \ 1.00, \ 0.00, \ 9214.00 ] \\\\
+    I^{\*} &= [ 3, \ 1, \ 6, \ 7, \ 10, \ 8, \ 0 ]
 \end{align}
 
-A variável $x_{11} = 9214.00$ é obtida pela adição de um corte big M no método dual simplex para transformar a base inicial como dual factível.
+A variável $x_{10} = 9214.00$ é obtida pela adição de um corte big M no método dual simplex para transformar a base inicial como dual factível.
 No caso, a solução ótima do problema é dada apenas por $ x^{\*} = [ 1.00, \ 1.00, \ 0.00, \ 0.00 ] $, com $ z^{\*} = 10.00$.
+
+---
+
+## Exercício 3
+
+![](https://i.imgur.com/qm711y6.png)
+
+
+a. $ x\_1 + x\_2 \leq 1 $
+
+b. $ x\_2 + x\_3 + x\_4 \leq 2 $
+
+c. $ x\_1 + x\_2 + x\_3 + x\_4 + x\_5 \leq 2 $
+
+O corte mínimo da letra c é $ x\_1 + x\_3 + x\_4 \leq 2 $, entretanto, pelos valores fracionais do vetor x, $ x\_1 + x\_3 + x\_4 \simeq 0.89 $, o que implica que o corte mínimo não elimina a solução fracional do problema relaxado. Aí, fiz o lifting desse corte como ensinado no livro do Wolsey que me deu um corte forte e válido de $ x\_1 + x\_2 + x\_3 + x\_4 + x\_5 \leq 2 $ para o problema inteiro. Como $ x\_2 = x\_5 = 1 $, logo, os outros valores fracionários é que tendem a ser eliminados pelo corte.
+
+---
+
+## Exercício 4
+
+![](https://i.imgur.com/DfGtJj8.png)
+
+Resolvendo pelo método dos planos cortantes com cortes de gommory, apenas a aplicação do corte $ x\_4 + x\_5 \geq 1 $ foi suficiente para eliminar a solução fracional do problema relaxado, resultando na solução ótima inteira $X^{\*} = [5,\ 1,\ 7,\ 0,\ 1]$ com valor ótimo $Z^{\*} = 13$
+
+Como $x\_4 = 6 - x\_1 - x\_2 $ e $ x\_5 = 9 - x\_1 - 3 x\_2 $, substituindo estes valores na restrição do corte, temos que:
+
+$$
+\begin{align}
+-2 x\_1 - 4 x\_2 + 15 &\geq 1 \therefore \\\\
+-2 x\_1 - 4 x\_2 &\geq -14 \therefore \\\\
+2 x\_1 + 4 x\_2 &\leq 14 \therefore \\\\
+\frac{x\_1}{2} + x\_2 &\leq \frac{7}{2}
+\end{align}
+$$
+
+Para construir o politopo temos as retas de suas fronteiras:
+
+1. $ y = \frac{x}{2} + 2 $
+2. $ y = - x + 6 $
+3. $ y = - \frac{x}{3} + 3 $
+4. $ y = - \frac{x}{2} + \frac{7}{2} $
+
+A área factível, sombreada em azul no gráfico abaixo, é a região delimitada pelas interseções das retas acima:
+
+![](https://i.imgur.com/LP9f7PS.png)
