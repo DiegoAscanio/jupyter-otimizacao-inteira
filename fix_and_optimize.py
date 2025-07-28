@@ -63,7 +63,27 @@ def resolve_PPL(
     res = linprog(c, A_ub=A, b_ub=b, method='highs')
     return avaliar_resultado(res)
 
-def resolve_subproblema_inteiro(
+def resolve_PPI(
+    A : np.ndarray,
+    b : np.ndarray,
+    c : np.ndarray
+) -> tuple:
+    """
+    Resolve o problema de Programação Linear Inteira (PPI)
+    Parâmetros:
+        A : np.ndarray - Matriz dos coeficientes das restrições
+        b : np.ndarray - Vetor dos limites das restrições
+        c : np.ndarray - Vetor dos coeficientes da função objetivo
+    Retorna:
+        tuple:
+            factível : bool - Indica se a solução é factível
+            x : np.ndarray - Solução do problema
+            z : float - Valor da função objetivo
+    """
+    res = milp(c, constraints=LinearConstraint(A, b, b), method='highs')
+    return avaliar_resultado(res)
+
+def constroi_subproblema(
     A : np.ndarray,
     b : np.ndarray,
     c : np.ndarray,
@@ -86,54 +106,85 @@ def resolve_subproblema_inteiro(
         b = np.append(b, valores_afixados[_])  # adicionar o valor afixado
         # adicionar novas variaveis na função objetivo
         c = np.append(c, np.zeros(2))  # duas variáveis de folga e excesso
-    # resolver o subproblema inteiro
-    res = milp(
-        c,
-        constraints=LinearConstraint(
-            A, b, b
-        ),
-        integrality = np.ones_like(c)
-    )
-    return avaliar_resultado(res)
+    # retorna o subproblema
+    return A, b, c
 
+def iguais_e_indices(
+    x_tilde : np.ndarray,
+    x_barra : np.ndarray,
+    epsilon : float = 1e-4
+) -> tuple:
+    """
+    Identifica os valores iguais e seus indices entre dois arrays
+    """
+    mask = np.isclose(x_tilde, x_barra, atol=epsilon)
+    indices, *_ = np.where(mask)
+    valores = x_barra[mask]
+    return valores, indices
 
-def rens(
+def fix_and_optimize(
     A : np.ndarray,
     b : np.ndarray,
     c : np.ndarray,
+    x_tilde : np.ndarray,
+    indices_de_otimizacao: np.ndarray
 ):
     """
-    Heurística construtiva RENS
+    Heurística fix and optimize
     
-    Recebe um problema de programação linear inteiro (PLI),
-    resolve sua versão relaxada e aplica a heurística RENS
-    encontrando um subconjunto F contido nas variáveis J do
-    problema original tal que F seja as variáveis não-inteiras
-    da relaxação linear do problema original.
+    Recebe um problema de programação linear inteiro (PLI)
+    e sua solução incumbente x_tilde.
 
-    Afixa-se os valores das variáveis que ficaram inteiras na
-    relaxação linear e resolve-se novamente o subproblema inteiro
-    com essas variáveis afixadas.
+    Aplica-se a heurística fix and optimize para resolver o problema.
 
     Argumentos:
         A : np.ndarray - Matriz dos coeficientes das restrições
         b : np.ndarray - Vetor dos limites das restrições
         c : np.ndarray - Vetor dos coeficientes da função objetivo
+        x_tilde : np.ndarray - Solução incumbente do problema original
+        indices_de_otimizacao : np.ndarray - Lista de Indices de
+        particionamento para otimizacao (e afixamento dos que não
+        pertencem) das variáveis
     Retorna:
         factivel: bool - Indica se a solução é factível
         z: valor da função objetivo da resolução final
         x: solução do problema
-        F: indices das variáveis não inteiras
-        x_F: valores intermediários das variáveis não inteiras.
+        snapshots : dict - Dicionário com os snapshots das soluções
+        intermediárias
     """
-    factivel, x_barra, z_barra = resolve_PPL(A, b, c)
-    # early return se não for factível
+    m, n = A.shape
+
+    factivel,*_  = resolve_PPL(A, b, c)
+    # early return se a versão relaxada não for factível
     if not factivel:
-        return None, None, None, None
-    x_F, F = fracionarios_e_indices(x_barra)
-    x_I, I = inteiros_e_indices(x_barra)
-    # Resolve o subproblema inteiro
-    factivel, x, z = resolve_subproblema_inteiro(
-        A, b, c, I, x_I
-    )
-    return factivel, z, x, F, x_F
+        return False, None, None, None
+
+    steps = 0
+    z_tilde = c @ x_tilde
+    snapshots = {
+        steps: {
+            'x': x_tilde,
+            'z': z_tilde
+        }
+    }
+    for i_T in indices_de_otimizacao:
+        indices_para_afixar = np.setdiff1d(
+            np.arange(n), i_T, assume_unique=True
+        )
+        valores_afixados = x_tilde[indices_para_afixar]
+        A_tilde, b_tilde, c_tilde = constroi_subproblema(
+            A, b, c, indices_para_afixar, valores_afixados
+        )
+        factivel, x_tilde, z_tilde = resolve_PPI(
+            A_tilde, b_tilde, c_tilde
+        )
+        if not factivel:
+            raise Exception(
+                'Exceção inesperada durante a resolução do subproblema inteiro'
+            )
+        steps += 1
+        snapshots[steps] = {
+            'x': x_tilde,
+            'z': z_tilde
+        }
+    return True, z_tilde, x_tilde, snapshots
