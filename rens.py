@@ -94,7 +94,7 @@ def resolve_subproblema_inteiro(
         ),
         integrality = np.ones_like(c)
     )
-    return avaliar_resultado(res)
+    return *avaliar_resultado(res), A, b, c
 
 
 def rens(
@@ -125,6 +125,8 @@ def rens(
         x: solução do problema
         F: indices das variáveis não inteiras
         x_F: valores intermediários das variáveis não inteiras.
+        I: indices das variáveis inteiras
+        x_I: valores intermediários das variáveis inteiras.
     """
     factivel, x_barra, z_barra = resolve_PPL(A, b, c)
     # early return se não for factível
@@ -133,7 +135,7 @@ def rens(
     x_F, F = fracionarios_e_indices(x_barra)
     x_I, I = inteiros_e_indices(x_barra)
     # Resolve o subproblema inteiro
-    factivel, x, z = resolve_subproblema_inteiro(
+    factivel, x, z, A, b, c = resolve_subproblema_inteiro(
         A, b, c, I, x_I
     )
-    return factivel, z, x, F, x_F
+    return factivel, z, x, F, x_F, I, x_I, A, b, c

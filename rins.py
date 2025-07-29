@@ -94,7 +94,7 @@ def resolve_subproblema_inteiro(
         ),
         integrality = np.ones_like(c)
     )
-    return avaliar_resultado(res)
+    return *avaliar_resultado(res), A, b, c
 
 def iguais_e_indices(
     x_tilde : np.ndarray,
@@ -149,7 +149,7 @@ def rins(
     # identificar os valores iguais e seus indices
     x_J, J = iguais_e_indices(x_tilde, x_barra)
     # resolver o subproblema inteiro com as variáveis afixadas
-    factivel, x, z = resolve_subproblema_inteiro(
+    factivel, x, z, A, b, c = resolve_subproblema_inteiro(
         A, b, c, J, x_J
     )
     return factivel, z, x, J, x_barra
