@@ -1,4 +1,4 @@
-from scipy.optimize import linprog, milp, LinearConstraint
+from scipy.optimize import linprog, milp, LinearConstraint, Bounds
 import numpy as np
 
 def inteiros_e_indices(
@@ -46,7 +46,8 @@ def avaliar_resultado(
 def resolve_PPL(
     A : np.ndarray,
     b : np.ndarray,
-    c : np.ndarray
+    c : np.ndarray,
+    all_binary = True
 ) -> tuple:
     """
     Resolve o problema de Programação Linear (PPL) relaxado
@@ -60,7 +61,10 @@ def resolve_PPL(
             x : np.ndarray - Solução do problema
             z : float - Valor da função objetivo
     """
-    res = linprog(c, A_eq=A, b_eq=b, method='highs')
+    bounds = (0, None)
+    if all_binary:
+        bounds = (0, 1)
+    res = linprog(c, A_eq=A, b_eq=b, bounds = bounds, method='highs')
     return avaliar_resultado(res)
 
 def resolve_subproblema_inteiro(
@@ -68,9 +72,12 @@ def resolve_subproblema_inteiro(
     b : np.ndarray,
     c : np.ndarray,
     indices_para_afixar : np.ndarray,
-    valores_afixados : np.ndarray
+    valores_afixados : np.ndarray,
+    all_binary = True
 ) -> tuple:
     # preparar o subproblema para resolução
+    n = len(c)
+    
     for _, i in enumerate(indices_para_afixar):
         # adicionar uma restrição do tipo x_i <= valor_afixado
         A = np.hstack((A, np.zeros((A.shape[0], 1)))) # coluna de zeros
@@ -87,12 +94,20 @@ def resolve_subproblema_inteiro(
         # adicionar novas variaveis na função objetivo
         c = np.append(c, np.zeros(2))  # duas variáveis de folga e excesso
     # resolver o subproblema inteiro
+    lb = [-np.inf] * len(c)
+    ub = [np.inf] * len(c)
+
+    if all_binary:
+        lb[0:n] = [0] * n
+        ub[0:n] = [1] * n
+    
     res = milp(
         c,
         constraints=LinearConstraint(
             A, b, b
         ),
-        integrality = np.ones_like(c)
+        integrality = np.ones_like(c),
+        bounds = Bounds(lb, ub)
     )
     return *avaliar_resultado(res), A, b, c
 
