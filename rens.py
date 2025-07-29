@@ -60,7 +60,7 @@ def resolve_PPL(
             x : np.ndarray - Solução do problema
             z : float - Valor da função objetivo
     """
-    res = linprog(c, A_ub=A, b_ub=b, method='highs')
+    res = linprog(c, A_eq=A, b_eq=b, method='highs')
     return avaliar_resultado(res)
 
 def resolve_subproblema_inteiro(

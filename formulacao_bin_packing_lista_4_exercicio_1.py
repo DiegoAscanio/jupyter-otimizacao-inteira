@@ -73,3 +73,8 @@ b = np.hstack((b, np.zeros(m)))  # vetor de termos independentes da restrição 
 c = np.zeros(numero_variaveis)
 # as m primeiras variáveis são as quantidades de caixa y_j que devem ser minimizadas
 c[:m] = 1
+
+# nomes das variáveis
+variables_names = ','.join(f'y_{j + 1}' for j in range(m)) + ','
+variables_names += ','.join(f'x_{i + 1}_{j + 1}' for i in range(n) for j in range(m)) + ','
+variables_names += ','.join(f's_{j + 1}' for j in range(m))
